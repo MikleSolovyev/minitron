@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <ncurses.h>
 #include <string.h>
+#include <time.h>
 
 #define LEN 8
 #define WID 5
@@ -18,33 +19,27 @@
 #define RCAR_COLOR 0x000000FF
 #define LLINE_COLOR 0x00FFFF00
 #define RLINE_COLOR 0x0000FF00
-#define BORDER_COLOR 0x00FFFFFF
 #define sec 1000000/16
 
 //start positions-------------
-#define L_X -1
-#define L_Y (WID / 2)
+#define L_X 0
+#define L_Y (WID / 2 + 1)
 
-#define R_X x_res
-#define R_Y (y_res - 1 - WID / 2)
+#define R_X (x_res - 1)
+#define R_Y (y_res - 2 - WID / 2)
 //############################
 
-#define SEND() if(-1 == send(udp_socket, ch, sizeof(char), 0)){ \
-	*ch = 'q';													\
-	mvprintw(LINES - 3, 0, "Send error");						\
+#define SEND() if(-1 == send(udp_socket, &ch1, sizeof(char), 0)){	\
+	work_flag = 2;													\
+	mvprintw(LINES - 3, 0, "Send error");							\
+	break;															\
 }
 
-#define CHECK_COLL() if(is_collision == 0 && (i < 0 || i >= y_res || j < 0 || j >= x_res || 																			   \
-					 ptr[i * xres_v + j] == LCAR_COLOR || ptr[i * xres_v + j] == RCAR_COLOR || ptr[i * xres_v + j] == LLINE_COLOR || ptr[i * xres_v + j] == RLINE_COLOR))  \
-						is_collision = 1;																																   \
-					 if(is_collision == 1 && (ptr[i * xres_v + j] == LCAR_COLOR || ptr[i * xres_v + j] == RCAR_COLOR))													   \
+#define CHECK_COLL() if(is_collision == 0 && (i <= 0 || i >= y_res - 1|| j <= 0 || j >= x_res - 1 || 																			\
+					 ptr[i * xres_v + j] == LCAR_COLOR || ptr[i * xres_v + j] == RCAR_COLOR || ptr[i * xres_v + j] == LLINE_COLOR || ptr[i * xres_v + j] == RLINE_COLOR))		\
+						is_collision = 1;																																		\
+					 if(is_collision == 1 && (ptr[i * xres_v + j] == LCAR_COLOR && car.color == RCAR_COLOR || ptr[i * xres_v + j] == RCAR_COLOR && car.color == LCAR_COLOR))	\
 						is_collision = 2;
-
-typedef struct{
-	int udp_socket;
-	char *ch;
-	char dir;
-} handlerData;
 
 struct vehicle{
 	int x;
@@ -60,120 +55,17 @@ void sig_handler(int sig){
 	work_flag = 0;
 }
 
-void* send_handler(void *arg){
-	handlerData *data = (handlerData *)arg;
-	int udp_socket = data->udp_socket;
-	char *ch = data->ch;
-	char dir = data->dir;
+void* key_handler(void *arg){
+	char *buf = (char *)arg;
+	
 	char prev;
-	
-	while(*ch != 'q'){
-		prev = *ch;
-		*ch = getc(stdin);
-		
-		if(prev == 0){
-			*ch = dir;
-			SEND();
-		}
-		else{
-			switch(*ch){
-				case 'w':
-					if(prev != 'w' && prev != 's'){
-						SEND();
-					}
-					else{
-						*ch = prev;
-					}
-					break;
-					
-				case 'a':
-					if(prev != 'a' && prev != 'd'){
-						SEND();
-					}
-					else{
-						*ch = prev;
-					}
-					break;
-					
-				case 's':
-					if(prev != 's' && prev != 'w'){
-						SEND();
-					}
-					else{
-						*ch = prev;
-					}
-					break;
-					
-				case 'd':
-					if(prev != 'd' && prev != 'a'){
-						SEND();
-					}
-					else{
-						*ch = prev;
-					}
-					break;
-					
-				case 'q':
-					SEND();
-					break;
-					
-				default:
-					*ch = prev;
-					break;
-			}
-		}
-	}
-	
-	return NULL;
-}
 
-void* recv_handler(void *arg){
-	handlerData *data = (handlerData *)arg;
-	int udp_socket = data->udp_socket;
-	char *ch = data->ch;
-	char dir = data->dir;
-	char prev;
-	
-	while(*ch != 'q'){
-		prev = *ch;
-		if(-1 == recv(udp_socket, ch, sizeof(char), 0)){
-			*ch = 'q';
-			mvprintw(LINES - 3, 0, "Recieve error");
-		}
+	while(work_flag == 1){
+		prev = *buf;
+		*buf = getc(stdin);
 		
-		if(prev == 0){
-			*ch = dir;
-		}
-		else{
-			switch(*ch){
-				case 'w':
-					if(prev == 'w' || prev == 's')
-						*ch = prev;
-					break;
-					
-				case 'a':
-					if(prev == 'a' || prev == 'd')
-						*ch = prev;
-					break;
-					
-				case 's':
-					if(prev == 's' || prev == 'w')
-						*ch = prev;
-					break;
-					
-				case 'd':
-					if(prev == 'd' || prev == 'a')
-						*ch = prev;
-					break;
-					
-				case 'q':
-					break;
-					
-				default:
-					*ch = prev;
-					break;
-			}
-		}
+		if(prev == 0)
+			*buf = 'z';
 	}
 	
 	return NULL;
@@ -182,7 +74,7 @@ void* recv_handler(void *arg){
 void clean_prev(uint32_t *ptr, int x_res, int y_res, int xres_v, struct vehicle car){
 	for(int i = (car.y - LEN); i <= (car.y + LEN); i++){
 		for(int j = (car.x - LEN); j <= (car.x + LEN); j++){
-			if(i >= 0 && i < y_res && j >= 0 && j < x_res && ptr[i * xres_v + j] == car.color)
+			if(i > 0 && i < y_res - 1 && j > 0 && j < x_res - 1 && ptr[i * xres_v + j] == car.color)
 				ptr[i * xres_v + j] = 0;
 		}
 	}
@@ -260,14 +152,11 @@ int main(int argc, char *argv[]){
 	//#####################################
 	
 	//other vars---------------------------
-	char ch1 = 0, ch2 = 0;
+	char ch1 = 0, prev1, dir1, ch2 = 0, prev2, dir2, buf = 0;
 	int bump1, bump2;
+	clock_t time;
 	
 	struct vehicle car1, car2;
-	
-	handlerData data_send, data_recv;
-	data_send.ch = &ch1;
-	data_recv.ch = &ch2;
 	//#####################################
 	
 	if(argc != 3){
@@ -306,7 +195,6 @@ int main(int argc, char *argv[]){
 	
 	peer_ip = ntohl(addr.sin_addr.s_addr);
 	getsockname(udp_socket, (struct sockaddr *)&addr, &size);
-	data_send.udp_socket = data_recv.udp_socket = udp_socket;
 	//####################################################################
 	
 	//fb init-------------------------------------------------------------
@@ -357,28 +245,8 @@ int main(int argc, char *argv[]){
 	//####################################################################
 	
 	//pthread init--------------------------------------------------------
-	if(peer_ip < ntohl(addr.sin_addr.s_addr)){
-		data_send.dir = 'd';
-		data_recv.dir = 'a';
-	}
-	else{
-		data_send.dir = 'a';
-		data_recv.dir = 'd';
-	}
-	
-	pthread_t snd_hndlr;
-	if(0 != pthread_create(&snd_hndlr, NULL, send_handler, &data_send)){
-		close(udp_socket);
-		close(fb);
-		munmap(ptr, map_size);
-		endwin();
-		system("reset");
-		perror("pthread error");
-		return __LINE__;
-	}
-	
-	pthread_t rcv_hndlr;
-	if(0 != pthread_create(&rcv_hndlr, NULL, recv_handler, &data_recv)){
+	pthread_t key_hndlr;
+	if(0 != pthread_create(&key_hndlr, NULL, key_handler, &buf)){
 		close(udp_socket);
 		close(fb);
 		munmap(ptr, map_size);
@@ -391,19 +259,6 @@ int main(int argc, char *argv[]){
 	
 	//clean screen--------------------------------------------------------
 	memset(ptr, 0, map_size);
-	for(int i = 0; i < info.yres; i++){
-		for(int j = 0; j < info.xres; j++){
-			if(ptr[i * info.xres_virtual + j] != 0){
-				close(udp_socket);
-				close(fb);
-				munmap(ptr, map_size);
-				endwin();
-				system("reset");
-				fprintf(stderr, "Can`t do blank screen\n");
-				return 3;
-			}
-		}
-	}
 	//####################################################################
 	
 	//cars and borders init-----------------------------------------------
@@ -413,22 +268,26 @@ int main(int argc, char *argv[]){
 		car1.y = L_Y;
 		car1.color = LCAR_COLOR;
 		car1.line_color = LLINE_COLOR;
+		dir1 = 'd';
 		
 		car2.x = R_X;
 		car2.y = R_Y;
 		car2.color = RCAR_COLOR;
 		car2.line_color = RLINE_COLOR;
+		dir2 = 'a';
 	}
 	else{
 		car1.x = R_X;
 		car1.y = R_Y;
 		car1.color = RCAR_COLOR;
 		car1.line_color = RLINE_COLOR;
+		dir1 = 'a';
 		
 		car2.x = L_X;
 		car2.y = L_Y;
 		car2.color = LCAR_COLOR;
 		car2.line_color = LLINE_COLOR;
+		dir2 = 'd';
 	}
 	
 	for(int i = (L_Y - WID / 2); i <= (L_Y + WID / 2); i++){
@@ -443,26 +302,118 @@ int main(int argc, char *argv[]){
 		}
 	}
 	
-	if(x_res < info.xres){
-		for(int i = 0; i < y_res; i++){
-			ptr[i * info.xres_virtual + x_res] = BORDER_COLOR;
-		}
+	
+	for(int i = 0; i < y_res; i++){
+		ptr[i * info.xres_virtual + (x_res - 1)] = car1.color + 0x01000000;
+		ptr[i * info.xres_virtual] = car1.color + 0x01000000;
 	}
 	
-	if(y_res < info.yres){
-		for(int i = 0; i < x_res; i++){
-			ptr[y_res * info.xres_virtual + i] = BORDER_COLOR;
-		}
+	for(int i = 0; i < x_res; i++){
+		ptr[(y_res - 1) * info.xres_virtual + i] = car1.color + 0x01000000;
+		ptr[i] = car1.color + 0x01000000;
 	}
 	//####################################################################
 	
-	while(work_flag == 1 && (ch1 == 0 || ch2 == 0)){}
+	while(work_flag == 1 && buf == 0){}
 	
 	int rendered = 0;
-	while(ch1 != 'q' && ch2 != 'q' && work_flag == 1 && car1.lose == 0 && car2.lose == 0){
+	while(work_flag == 1 && car1.lose == 0 && car2.lose == 0){
+		time = clock();
+		
+		//getchar from key_handler----------------------------------------
+		prev1 = ch1;
+		ch1 = buf;
+		
+		if(prev1 == 0){
+			ch1 = dir1;
+		}
+		else{
+			switch(ch1){
+				case 'w':
+					if(prev1 == 's')
+						ch1 = prev1;
+					break;
+					
+				case 'a':
+					if(prev1 == 'd')
+						ch1 = prev1;
+					break;
+					
+				case 's':
+					if(prev1 == 'w')
+						ch1 = prev1;
+					break;
+					
+				case 'd':
+					if(prev1 == 'a')
+						ch1 = prev1;
+					break;
+					
+				case 'q':
+					work_flag = 3;
+					break;
+					
+				default:
+					ch1 = prev1;
+					break;
+			}
+		}
+
+		SEND();
+		
+		if(work_flag != 1)
+			break;
+		//################################################################
+
+		//recive message--------------------------------------------------
+		prev2 = ch2;
+		if(-1 == recv(udp_socket, &ch2, sizeof(char), 0)){
+			work_flag = 2;
+			mvprintw(LINES - 3, 0, "Recieve error");
+			break;
+		}
+			
+		if(prev2 == 0){
+			ch2 = dir2;
+		}
+		else{
+			switch(ch2){
+				case 'w':
+					if(prev2 == 's')
+						ch2 = prev2;
+					break;
+					
+				case 'a':
+					if(prev2 == 'd')
+						ch2 = prev2;
+					break;
+					
+				case 's':
+					if(prev2 == 'w')
+						ch2 = prev2;
+					break;
+					
+				case 'd':
+					if(prev2 == 'a')
+						ch2 = prev2;
+					break;
+					
+				case 'q':
+					work_flag = 3;
+					break;
+					
+				default:
+					ch2 = prev2;
+					break;
+			}
+		}
+		
+		if(work_flag != 1)
+			break;
+		//################################################################
+		
 		curs_set(1);
 
-		rendered++;
 		clean_prev(ptr, x_res, y_res, info.xres_virtual, car1);
 		clean_prev(ptr, x_res, y_res, info.xres_virtual, car2);
 		
@@ -507,8 +458,6 @@ int main(int argc, char *argv[]){
 			default:
 				break;
 		}
-		
-		curs_set(0);
 
 		bump1 = draw(ptr, x_res, y_res, info.xres_virtual, ch1, car1);
 		switch(bump1){
@@ -539,14 +488,19 @@ int main(int argc, char *argv[]){
 			default:
 				break;
 		}
+		
+		curs_set(0);
+		
+		rendered++;
+		
+		time = clock() - time;
 
-		usleep(sec);
+		usleep(sec - time);
 	}
 	
 	close(fb);
 	munmap(ptr, map_size);
-	pthread_cancel(snd_hndlr);
-	pthread_cancel(rcv_hndlr);
+	pthread_cancel(key_hndlr);
 	
 	if(work_flag == 0){
 		ch1 = 'q';
@@ -555,7 +509,7 @@ int main(int argc, char *argv[]){
 	close(udp_socket);
 	
 	//print results-------------------------------------------------------
-	if(ch1 == 'q' || ch2 == 'q'){
+	if(work_flag != 1){
 		mvprintw(LINES - 2, 0, "Stopped!");
 	}
 	else if(car1.lose == 0 && car2.lose == 1){
@@ -572,7 +526,7 @@ int main(int argc, char *argv[]){
 	refresh();
 	//####################################################################
 	
-	while(getc(stdin) != 'q'){};
+	while(getc(stdin) != 'q'){}
 	endwin();
 	system("reset");
 
